@@ -1,7 +1,9 @@
 # DemoCodeV2
 
-New Matrix- and Vector-operation classes, 
-for seamless mathematical operations.
+Selected set of classes used in Sphereless-WebApp.
+
+1. Phenotype computer for GTO optimisation
+2. New Matrix- and Vector-operation classes, for seamless mathematical operations.
 
 Matrix-class now inherits from Vector-class, for
 continuous (!) memory-allocation. Performance! 
