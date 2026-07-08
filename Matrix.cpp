@@ -12,124 +12,185 @@
 
 // constructor
 template <typename T>
-Matrix<T>::Matrix			(unsigned int nRows, unsigned int nCols, T value)
-:	Vector<T>	(nRows*nCols, value),
-_nRows		(nRows),
-_nCols		(nCols),
-_fPtrIndex	(&Matrix::indexColVec)
+Matrix<T>::Matrix			(unsigned int nRows,
+                             unsigned int nCols,
+                             T value)
+			:	Vector<T>	(nRows*nCols, true, value),
+				_nRows		(nRows),
+				_nCols		(nCols),
+				_indexMappingFct(&Matrix::mapFctColumn),                                 // TODO: verify !
+                _dimString  (""),
+                _add        (nullptr),
+                _substr     (nullptr),
+                _mult       (nullptr),
+                _pow        (nullptr),
+                _mMultByVec (nullptr)
 {
-	/* empty */
+	// permit re-orientation only for square matrices
+	if (this->isSquare())
+		Vector<T>::allowReorient();
+	
+	this->updateDimString();
 }
 template <typename T>
 Matrix<T>::Matrix			(const Matrix<T>& matrix)
-:	Vector<T>	(matrix),
-_nRows		(matrix._nRows),
-_nCols		(matrix._nCols),
-_fPtrIndex	(matrix.isColVector() ?  (&Matrix::indexColVec) : (&Matrix::indexRowVec))
+			:	Matrix		(matrix._nRows,
+                             matrix._nCols)
 {
-	/* empty */
+	_indexMappingFct =	this->isColVector()
+                        ? &Matrix::mapFctColumn
+                        : &Matrix::mapFctRow;		                                            // TODO: verify !
+	*this = matrix;
 }
 template <typename T>
 Matrix<T>::~Matrix			()
 {
-	// delete _fPtrIndex;
+    /*
+     *  All members deleted by Vector,
+     *  including helpers.
+     */
 }
 
 
 
 // gets
+
 template <typename T>
-unsigned int				Matrix<T>::getNumRows	()	const	{ return _nRows;	}
+unsigned int				Matrix<T>::getNumRows		()	const	{ return _nRows;	}
 template <typename T>
-unsigned int				Matrix<T>::getNumCols	()	const	{ return _nCols;	}
+unsigned int				Matrix<T>::getNumCols		()	const	{ return _nCols;	}
 template <typename T>
-bool						Matrix<T>::isSquareMat	()	const	{ return _nRows == _nCols;}
+std::string					Matrix<T>::getDimString		()	const	{ return _dimString;	}
 template <typename T>
-bool						Matrix<T>::hasSameSize	(const Matrix<T> &mat) const	{ return (mat._nRows == _nRows && mat._nCols == _nCols);}
+bool						Matrix<T>::isSquare			()	const	{ return _nRows == _nCols;}
 template <typename T>
-bool						Matrix<T>::isMultiplyOk	(const Matrix<T> &mat) const	{ return _nCols == mat._nRows;		}
+bool						Matrix<T>::isSameDimension	(const Matrix<T> &mat) const	{ return (mat._nRows == _nRows && mat._nCols == _nCols);}
 template <typename T>
-bool						Matrix<T>::isMultiplyOk	(const Vector<T> &vec) const	{ return _nCols == vec.getLen();	}
+bool						Matrix<T>::isMultiplyOk		(const Matrix<T> &mat) const	{ return _nCols == mat._nRows;		}
+template <typename T>
+bool						Matrix<T>::isMultiplyOk		(const Vector<T> &vec) const	{ return _nCols == vec.getLen();	}
 
 
 
 // operators
 
 template <typename T>
-Matrix<T>&					Matrix<T>::operator =	(const Matrix<T> &mat)
+T&							Matrix<T>::operator	()		(unsigned int iRow, unsigned int iCol) const
 {
-	if (hasSameSize(mat))
-		Vector<T>::operator = (mat);
+	return Vector<T>::operator [] ((this->*_indexMappingFct)(iRow, iCol));
+}
+
+template <typename T>
+Matrix<T>&					Matrix<T>::operator =		(const Matrix<T> &mat)
+{
+    this->verifySameDimOrThrow(mat, "=");
+	
+	Vector<T>::operator = (mat);
+	if (Vector<T>::hasReoriented()) this->updateMapFunction();
+	
 	return *this;
 }
+
+/**
+ *	Transpose-operator
+ */
 template <typename T>
-T&							Matrix<T>::operator	()	(unsigned int iRow, unsigned int iCol) const
+Matrix<T>&					Matrix<T>::operator ~		()
 {
-	return Vector<T>::operator [] ((this->*_fPtrIndex)(iRow, iCol));
+	Vector<T>::operator ~();
+	updateMapFunction();
+	
+	// swap rows, cols
+	unsigned int temp = _nRows;
+	_nRows = _nCols;
+	_nCols = temp;
+	this->updateDimString();
+	
+	return *this;
 }
-template <typename T>
-bool						Matrix<T>::operator	==	(const Matrix<T>& mat) const
-{
-	if (!Vector<T>::operator == (mat))
-		return false;
-	return hasSameSize(mat);
-}
-template <typename T>
-bool						Matrix<T>::operator	!=	(const Matrix<T>& mat) const				{	return !operator==(mat);		}
 
 
 template <typename T>
-Matrix<T>&					Matrix<T>::operator +=	(const Matrix<T>& mat)
+bool						Matrix<T>::operator	==		(const Matrix<T>& mat) const
 {
-	if (hasSameSize(mat))
-		Vector<T>::operator += (mat);
-	return *this;
+	if (!this->isSameDimension(mat))	return false;
+	
+	return (Vector<T>::operator == (mat));
 }
 template <typename T>
-Matrix<T>&					Matrix<T>::operator -=	(const Matrix<T>& mat)
+bool						Matrix<T>::operator ==		(const T& value)	   const
 {
-	if (hasSameSize(mat))
-		Vector<T>::operator -= (mat);
-	return *this;
+	return (Vector<T>::operator == (value));
 }
 template <typename T>
-Matrix<T>&					Matrix<T>::operator *=	(const Matrix<T>& mat)
+bool						Matrix<T>::operator	!=		(const Matrix<T>& mat) const
 {
-	if (isSquareMat() && isMultiplyOk(mat))
+	return !(operator == (mat));
+}
+
+
+template <typename T>
+Matrix<T>&					Matrix<T>::operator +=		(const Matrix<T>& mat)
+{
+    this->verifySameDimOrThrow(mat, "+=");
+	
+	Vector<T>::operator += (mat);
+	return *this;
+}
+
+template <typename T>
+Matrix<T>&					Matrix<T>::operator -=		(const Matrix<T>& mat)
+{
+    this->verifySameDimOrThrow(mat, "-=");
+	
+	Vector<T>::operator -= (mat);
+	return *this;
+}
+
+template <typename T>
+Matrix<T>&					Matrix<T>::operator *=		(T factor)
+{
+	Vector<T>::operator *= (factor);
+	return *this;
+}
+
+/**
+ *	In operator *= (Matrix&), 'this'-object must be square,
+ *	to retain its dimension before and after multiplication.
+ *
+ *		this *= arg
+ *	<=>	this(pre)  *  arg   = this(post)
+ *		---------    -----    -----------
+ *		rect.[3,5] * [5,3]	= [3,3]		-> different dimension!
+ *		sq.	 [3,3] * [3,3]	= [3,3]		-> same dimension!
+ */
+template <typename T>
+Matrix<T>&					Matrix<T>::operator *=		(const Matrix<T>& mat)
+{
+    this->verifySquareOrThrow("*=");
+	
+	*this = *this * mat;
+	return *this;
+}
+
+template <typename T>
+Matrix<T>&					Matrix<T>::operator /=		(T factor)
+{
+	Vector<T>::operator /= (factor);
+	return *this;
+}
+
+template <typename T>
+Matrix<T>&					Matrix<T>::operator ^=		(unsigned int exponent)
+{
+	this->verifySquareOrThrow("^=");
+	
+	if (exponent > 1)
 	{
-		Matrix<T> copy(*this);
-		this->reset();
-		
-		for (unsigned int i=0; i < _nRows; ++i)
-			for (unsigned int j=0; j < mat._nCols; ++j)
-				for (unsigned int k=0; k < _nCols; ++k)
-					(*this)(i,j) += (copy)(i,k) * (mat)(k,j);
+        if (_pow == nullptr) _pow = new Matrix<T>(*this);
+		for (unsigned int i=2; i <= exponent; i++)
+			*this = (*this) * (*_pow);
 	}
-	return *this;
-}
-
-template <typename T>
-Matrix<T>&					Matrix<T>::operator *=	(int factor)
-{
-	Vector<T>::operator *= (factor);
-	return *this;
-}
-template <typename T>
-Matrix<T>&					Matrix<T>::operator *=	(double factor)
-{
-	Vector<T>::operator *= (factor);
-	return *this;
-}
-template <typename T>
-Matrix<T>&					Matrix<T>::operator /=	(int factor)
-{
-	Vector<T>::operator /= (factor);
-	return *this;
-}
-template <typename T>
-Matrix<T>&					Matrix<T>::operator /=	(double factor)
-{
-	Vector<T>::operator /= (factor);
 	return *this;
 }
 
@@ -138,59 +199,101 @@ Matrix<T>&					Matrix<T>::operator /=	(double factor)
 // methods
 
 template <typename T>
-unsigned int				Matrix<T>::indexColVec	(unsigned int iRow, unsigned int iCol) const
+void						Matrix<T>::verifySameDimOrThrow		(const Matrix<T> &mat, std::string operation)	const
+{
+	if (!this->isSameDimension(mat)) {
+		this->_logger->error(typeid(this).name(), "Matrix-argument has incompatible dimension "+mat.getDimString()+" for ("+operation+").");
+		throw std::invalid_argument("Matrix-argument has incompatible dimension "+mat.getDimString()+" for ("+operation+").");
+	}
+}
+
+template <typename T>
+void						Matrix<T>::verifySquareOrThrow		(std::string operation)	const
+{
+	if(!this->isSquare()) {
+		this->_logger->error(typeid(this).name(), "Non-square Matrix prevents self-assigning result to 'this' in ("+operation+").");
+		throw std::domain_error("Non-square Matrix prevents self-assigning result to 'this' in ("+operation+").");
+	}
+}
+
+template <typename T>
+void						Matrix<T>::verifyMultiplyOrThrow	(const Matrix<T> &mat, std::string operation)	const
+{
+	if (!this->isMultiplyOk(mat)) {
+		this->_logger->error(typeid(this).name(), "Matrix-argument has incompatible dimension "+mat.getDimString()+" for ("+operation+").");
+		throw std::invalid_argument("Matrix-argument has incompatible dimension "+mat.getDimString()+" for ("+operation+").");
+	}
+}
+
+template <typename T>
+void						Matrix<T>::updateDimString			()
+{
+	std::ostringstream os;
+	os << _nRows << "x" << _nCols;
+	_dimString = os.str();
+}
+
+template <typename T>
+void						Matrix<T>::updateMapFunction			()
+{
+	// re-assign fPtr
+	_indexMappingFct = Vector<T>::isColVector()
+                    ? &Matrix::mapFctColumn
+                    : &Matrix::mapFctRow;
+ /*
+    _add->updateMapFunction(_add->isColVector()
+                    ? _add->Matrix::mapFctColumn
+                    : _add->Matrix::mapFctRow);
+  */
+}
+
+/**
+ *		Mapping functions (column, row)
+ */
+template <typename T>
+unsigned int				Matrix<T>::mapFctColumn		(unsigned int iRow, unsigned int iCol) const
 {
 	// Spaltenvektor (Nx1)
 	return (iCol * _nRows + iRow);
 }
 
 template <typename T>
-unsigned int				Matrix<T>::indexRowVec	(unsigned int iRow, unsigned int iCol) const
+unsigned int				Matrix<T>::mapFctRow		(unsigned int iRow, unsigned int iCol) const
 {
 	// Zeilenvektor (1xN)
 	return (iRow * _nCols + iCol);
 }
 
-template <typename T>
-void						Matrix<T>::reset		(T value)									{	Vector<T>::reset(value);		}
-
-template <typename T>
-Matrix<T>&					Matrix<T>::transpose	()
-{
-	Vector<T>::transpose();
-	
-	// re-assign fPtr
-	_fPtrIndex = Vector<T>::isColVector() ? (&Matrix::indexColVec) : (&Matrix::indexRowVec);
-	
-	// swap rows, cols
-	unsigned int temp = _nRows;
-	_nRows = _nCols;
-	_nCols = temp;
-	
-	return *this;
-}
 
 template <typename T>
 void						Matrix<T>::makeUnity	()
 {
-	reset();
-	for (unsigned int i=0; i < (_nRows<_nCols ? _nRows:_nCols); ++i)
+    this->reset();
+	for (unsigned int i=0; i < std::min(_nRows, _nCols); ++i)
 		(*this)(i,i) = (T)1;
 }
 
 template <typename T>
-void						Matrix<T>::print		() const
+void						Matrix<T>::reset		(T value)
 {
-	std::cout << std::right << std::setprecision(3) << std::setfill(' ');
-	for (unsigned int i=0; i < _nRows; ++i)
-	{
-		for (unsigned int j=0; j < _nCols; ++j)
-			std::cout << std::setw(10) << Vector<T>::operator [] ((this->*_fPtrIndex)(i, j));
-		std::cout << std::endl;
-	}
-	std::cout << std::endl;
+	Vector<T>::reset(value);
 }
 
+template <typename T>
+void						Matrix<T>::print		(std::ostream& os,
+													 unsigned int indent,
+													 unsigned int precision)	const
+{
+	os << std::right << std::setfill(' ') << std::fixed;
+	
+	for (unsigned int i=0; i < _nRows; ++i) {
+		os << std::setw(indent) << Constants::Outputs::INTROCHAR << " ";
+		os << std::setprecision(precision);
+		for (unsigned int j=0; j < _nCols; ++j)
+			os << std::setw(Constants::Outputs::WIDTHVALUE) << Vector<T>::operator [] ((this->*_indexMappingFct)(i, j));
+		os << std::endl;
+	}
+}
 
 
 // static methods
